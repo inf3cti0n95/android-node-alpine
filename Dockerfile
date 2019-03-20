@@ -1,13 +1,25 @@
-FROM openjdk:8-alpine3.9
+FROM alpine:edge
 LABEL maintainer="Viraj Trivedi <inf3cti0n95@gmail.com>"
 
+ENV LANG C.UTF-8
+ENV WATCHMAN_VERSION "4.9.0-r2"
+ENV NODEJS_VERSION "10.15.3-r0"
+ENV YARN_VERSION "1.15.2-r0"
+ENV OPENJDK_VERSION "8.201.08-r0"
 ENV SDK_TOOLS "4333796"
 ENV ANDROID_HOME "/opt/sdk"
 ENV GLIBC_VERSION "2.28-r0"
+
+ENV JAVA_HOME=/usr/lib/jvm/java-1.8-openjdk
+
+ENV PATH=$PATH:$JAVA_HOME/jre/bin:$JAVA_HOME/bin
 ENV PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools
 
-# Install required dependencies
-RUN apk add --no-cache bash git unzip wget && \
+RUN apk add -X http://dl-cdn.alpinelinux.org/alpine/edge/testing --no-cache bash git unzip wget nss \
+    watchman="$WATCHMAN_VERSION" \
+    nodejs="$NODEJS_VERSION" \
+    openjdk8="$OPENJDK_VERSION" \
+    yarn="$YARN_VERSION" && \
     wget -q https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub -O /etc/apk/keys/sgerrand.rsa.pub && \
     wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VERSION}/glibc-${GLIBC_VERSION}.apk -O /tmp/glibc.apk && \
     wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VERSION}/glibc-bin-${GLIBC_VERSION}.apk -O /tmp/glibc-bin.apk && \
@@ -16,90 +28,33 @@ RUN apk add --no-cache bash git unzip wget && \
     rm -rf /tmp/* && \
     rm -rf /var/cache/apk/*
 
-# Download and extract Android Tools
 RUN wget -q http://dl.google.com/android/repository/sdk-tools-linux-${SDK_TOOLS}.zip -O /tmp/tools.zip && \
     mkdir -p ${ANDROID_HOME} && \
     unzip -qq /tmp/tools.zip -d ${ANDROID_HOME} && \
     rm -v /tmp/tools.zip
 
-# Install SDK Packages
 RUN mkdir -p ~/.android/ && touch ~/.android/repositories.cfg && \
     yes | ${ANDROID_HOME}/tools/bin/sdkmanager "--licenses" && \
     ${ANDROID_HOME}/tools/bin/sdkmanager "--update" && \
-    ${ANDROID_HOME}/tools/bin/sdkmanager "platform-tools" "extras;android;m2repository" "extras;google;m2repository" "extras;google;instantapps"
+    ${ANDROID_HOME}/tools/bin/sdkmanager \
+    "platform-tools" \
+    "extras;android;m2repository" \
+    "extras;google;m2repository" \
+    "extras;google;instantapps" \
+    "extras;google;google_play_services" \
+    "extras;google;market_apk_expansion" \
+    "extras;google;market_licensing" \
+    "extras;google;simulators" \
+    "extras;google;webdriver" \
+    "extras;m2repository;com;android;support;constraint;constraint-layout;1.0.2" \
+    "extras;m2repository;com;android;support;constraint;constraint-layout;1.0.1"
 
 ENV BUILD_TOOLS "28.0.3"
 ENV TARGET_SDK "28"
+ENV GOOGLE_APIS "24"
 
-# Install SDK Packages
-RUN ${ANDROID_HOME}/tools/bin/sdkmanager "build-tools;${BUILD_TOOLS}" "platforms;android-${TARGET_SDK}"
+RUN ${ANDROID_HOME}/tools/bin/sdkmanager "build-tools;${BUILD_TOOLS}" "platforms;android-${TARGET_SDK}" "add-ons;addon-google_apis-google-${GOOGLE_APIS}"
 
-ENV NODE_VERSION 8.15.1
+RUN yarn global add envinfo
 
-RUN addgroup -g 1000 node \
-    && adduser -u 1000 -G node -s /bin/sh -D node \
-    && apk add --no-cache \
-        libstdc++ \
-    && apk add --no-cache --virtual .build-deps \
-        binutils-gold \
-        curl \
-        g++ \
-        gcc \
-        gnupg \
-        libgcc \
-        linux-headers \
-        make \
-        python \
-  # gpg keys listed at https://github.com/nodejs/node#release-keys
-  && for key in \
-    94AE36675C464D64BAFA68DD7434390BDBE9B9C5 \
-    FD3A5288F042B6850C66B31F09FE44734EB7990E \
-    71DCFD284A79C3B38668286BC97EC7A07EDE3FC1 \
-    DD8F2338BAE7501E3DD5AC78C273792F7D83545D \
-    C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8 \
-    B9AE9905FFD7803F25714661B63B535A4C206CA9 \
-    77984A986EBC2AA786BC0F66B01FBB92821C587A \
-    8FCCA13FEF1D0C2E91008E09770F7A9A5AE15600 \
-    4ED778F539E3634C779C87C6D7062848A1AB005C \
-    A48C2BEE680E841632CD4E44F07496B3EB3C1762 \
-    B9E2F5981AA6E0CD28160D9FF13993A75599653C \
-  ; do \
-    gpg --batch --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys "$key" || \
-    gpg --batch --keyserver hkp://ipv4.pool.sks-keyservers.net --recv-keys "$key" || \
-    gpg --batch --keyserver hkp://pgp.mit.edu:80 --recv-keys "$key" ; \
-  done \
-    && curl -fsSLO --compressed "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION.tar.xz" \
-    && curl -fsSLO --compressed "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt.asc" \
-    && gpg --batch --decrypt --output SHASUMS256.txt SHASUMS256.txt.asc \
-    && grep " node-v$NODE_VERSION.tar.xz\$" SHASUMS256.txt | sha256sum -c - \
-    && tar -xf "node-v$NODE_VERSION.tar.xz" \
-    && cd "node-v$NODE_VERSION" \
-    && ./configure \
-    && make -j$(getconf _NPROCESSORS_ONLN) \
-    && make install \
-    && apk del .build-deps \
-    && cd .. \
-    && rm -Rf "node-v$NODE_VERSION" \
-    && rm "node-v$NODE_VERSION.tar.xz" SHASUMS256.txt.asc SHASUMS256.txt
-
-ENV YARN_VERSION 1.12.3
-
-RUN apk add --no-cache --virtual .build-deps-yarn curl gnupg tar \
-  && for key in \
-    6A010C5166006599AA17F08146C2130DFD2497F5 \
-  ; do \
-    gpg --batch --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys "$key" || \
-    gpg --batch --keyserver hkp://ipv4.pool.sks-keyservers.net --recv-keys "$key" || \
-    gpg --batch --keyserver hkp://pgp.mit.edu:80 --recv-keys "$key" ; \
-  done \
-  && curl -fsSLO --compressed "https://yarnpkg.com/downloads/$YARN_VERSION/yarn-v$YARN_VERSION.tar.gz" \
-  && curl -fsSLO --compressed "https://yarnpkg.com/downloads/$YARN_VERSION/yarn-v$YARN_VERSION.tar.gz.asc" \
-  && gpg --batch --verify yarn-v$YARN_VERSION.tar.gz.asc yarn-v$YARN_VERSION.tar.gz \
-  && mkdir -p /opt \
-  && tar -xzf yarn-v$YARN_VERSION.tar.gz -C /opt/ \
-  && ln -s /opt/yarn-v$YARN_VERSION/bin/yarn /usr/local/bin/yarn \
-  && ln -s /opt/yarn-v$YARN_VERSION/bin/yarnpkg /usr/local/bin/yarnpkg \
-  && rm yarn-v$YARN_VERSION.tar.gz.asc yarn-v$YARN_VERSION.tar.gz \
-  && apk del .build-deps-yarn
-
-CMD [ "node" ]
+CMD [ "envinfo" ]
